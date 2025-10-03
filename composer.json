@@ -61,7 +61,12 @@
             "@php artisan config:clear --ansi",
             "@php artisan test"
         ],
-        "stan": "@php ./vendor/bin/phpstan analyse --ansi"
+        "stan": "@php ./vendor/bin/phpstan analyse --ansi",
+        "verify": [
+            "@php ./vendor/bin/pint --test",
+            "@stan",
+            "@test"
+        ]
     },
     "extra": {
         "laravel": {
