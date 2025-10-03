@@ -1,0 +1,77 @@
+name: linter
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linter-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          extensions: sqlite3, mbstring, dom, fileinfo
+          coverage: none
+
+      - name: Cache Composer deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor
+            ~/.composer/cache
+          key: composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            composer-
+
+      - name: Install Composer Dependencies
+        run: composer install --no-progress --prefer-dist --no-interaction
+
+      - name: Install Node Dependencies
+        run: npm install --no-audit --no-fund --no-progress
+
+      - name: Backend Lint (Pint)
+        run: vendor/bin/pint --test
+
+      - name: Frontend Format Check (Prettier)
+        run: npm run format:check
+
+      - name: Frontend Lint (ESLint)
+        run: npm run lint
+
+      # Optional: Automatically commit formatting fixes if desired
+      # - name: Commit formatting fixes
+      #   if: failure() && github.event_name == 'pull_request'
+      #   uses: stefanzweifel/git-auto-commit-action@v5
+      #   with:
+      #     commit_message: 'chore: apply auto-formatting'
+      #     branch: ${{ github.head_ref }}
+      #     commit_options: '--no-verify'
+
+    # Note: ESLint warnings do not fail the job. To enforce zero warnings, replace npm run lint with:
+    # run: npm run lint -- --max-warnings=0
+
