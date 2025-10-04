@@ -6,6 +6,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Wallet\Exceptions\AmountMustBeGreaterThanZero;
 use App\Services\Wallet\Exceptions\CannotTransferToSelf;
+use App\Services\Wallet\Exceptions\IdempotencyConflict;
 use App\Services\Wallet\Exceptions\InsufficientFunds;
 use App\Services\Wallet\Exceptions\InvalidAmountFormat;
 use App\Services\Wallet\Exceptions\ReceiverNotFound;
@@ -33,13 +34,6 @@ class TransferService
     public function transfer(User $sender, int $receiverId, string $amount, ?string $idempotencyKey = null): Transaction
     {
         return DB::transaction(function () use ($sender, $receiverId, $amount, $idempotencyKey) {
-            if ($idempotencyKey) {
-                $existing = $this->transactionModel->newQuery()->where('uuid', $idempotencyKey)->first();
-                if ($existing) {
-                    return $existing;
-                }
-            }
-
             if ($sender->id === $receiverId) {
                 throw new CannotTransferToSelf('Cannot transfer to the same user.');
             }
@@ -47,6 +41,19 @@ class TransferService
             $amount = $this->normalizeAmount($amount);
             if ($amount === '0.00') {
                 throw new AmountMustBeGreaterThanZero('Amount must be greater than zero.');
+            }
+            if ($idempotencyKey) {
+                $existing = $this->transactionModel->newQuery()->where('uuid', $idempotencyKey)->first();
+                if ($existing) {
+                    $existingAmountNormalized = $this->normalizeAmount((string) $existing->amount);
+                    $same = ($existing->sender_id === $sender->id)
+                        && ($existing->receiver_id === $receiverId)
+                        && ($existingAmountNormalized === $amount);
+                    if ($same) {
+                        return $existing;
+                    }
+                    throw new IdempotencyConflict('Idempotency key reused with different parameters.');
+                }
             }
 
             $orderedIds = [$sender->id, $receiverId];
@@ -96,7 +103,7 @@ class TransferService
                 'uuid' => $uuid,
                 'sender_id' => $lockedSender->id,
                 'receiver_id' => $lockedReceiver->id,
-                'amount' => $amount, // original normalized amount
+                'amount' => $amount,
                 'commission_fee' => $commission,
                 'status' => 'success',
             ]);

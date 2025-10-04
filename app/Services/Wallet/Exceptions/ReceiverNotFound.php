@@ -2,6 +2,4 @@
 
 namespace App\Services\Wallet\Exceptions;
 
-use RuntimeException;
-
-class ReceiverNotFound extends RuntimeException {}
+class ReceiverNotFound extends WalletException {}

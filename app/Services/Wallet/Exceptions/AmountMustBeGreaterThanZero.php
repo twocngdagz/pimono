@@ -2,6 +2,4 @@
 
 namespace App\Services\Wallet\Exceptions;
 
-use RuntimeException;
-
-class AmountMustBeGreaterThanZero extends RuntimeException {}
+class AmountMustBeGreaterThanZero extends WalletException {}

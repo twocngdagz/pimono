@@ -2,6 +2,4 @@
 
 namespace App\Services\Wallet\Exceptions;
 
-use RuntimeException;
-
-class CannotTransferToSelf extends RuntimeException {}
+class CannotTransferToSelf extends WalletException {}
