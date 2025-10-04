@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Route;
 use function Pest\Laravel\postJson;
 
 it('maps AmountMustBeGreaterThanZero to 400 JSON response', function () {
-      Route::post('/_test/ex/amt-zero', function () {
+    Route::post('/_test/ex/amt-zero', function () {
         throw new AmountMustBeGreaterThanZero('Amount must be greater than zero.');
     });
 
