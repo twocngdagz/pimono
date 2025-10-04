@@ -2,6 +2,5 @@
 
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+// Single Page Application catch-all route
+Route::view('/{any?}', 'app')->where('any', '.*');
