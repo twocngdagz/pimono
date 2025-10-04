@@ -63,15 +63,3 @@ jobs:
       - name: Frontend Lint (ESLint)
         run: npm run lint
 
-      # Optional: Automatically commit formatting fixes if desired
-      # - name: Commit formatting fixes
-      #   if: failure() && github.event_name == 'pull_request'
-      #   uses: stefanzweifel/git-auto-commit-action@v5
-      #   with:
-      #     commit_message: 'chore: apply auto-formatting'
-      #     branch: ${{ github.head_ref }}
-      #     commit_options: '--no-verify'
-
-    # Note: ESLint warnings do not fail the job. To enforce zero warnings, replace npm run lint with:
-    # run: npm run lint -- --max-warnings=0
-
