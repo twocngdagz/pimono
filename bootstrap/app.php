@@ -3,6 +3,9 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use App\Services\Wallet\Exceptions\WalletException;
+use App\Services\Wallet\Exceptions\InvalidAmountFormat;
+use App\Services\Wallet\Exceptions\AmountMustBeGreaterThanZero;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -15,5 +18,14 @@ return Application::configure(basePath: dirname(__DIR__))
         //
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->render(function (WalletException $e) {
+            $status = match (true) {
+                $e instanceof InvalidAmountFormat, $e instanceof AmountMustBeGreaterThanZero => 400,
+                default => 422,
+            };
+            return response()->json([
+                'error' => $e->getMessage(),
+                'type' => class_basename($e),
+            ], $status);
+        });
     })->create();
