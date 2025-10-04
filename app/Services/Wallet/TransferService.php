@@ -4,10 +4,14 @@ namespace App\Services\Wallet;
 
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Wallet\Exceptions\AmountMustBeGreaterThanZero;
+use App\Services\Wallet\Exceptions\CannotTransferToSelf;
 use App\Services\Wallet\Exceptions\InsufficientFunds;
+use App\Services\Wallet\Exceptions\InvalidAmountFormat;
+use App\Services\Wallet\Exceptions\ReceiverNotFound;
+use App\Services\Wallet\Exceptions\SenderNotFound;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use RuntimeException;
 
 class TransferService
 {
@@ -37,12 +41,12 @@ class TransferService
             }
 
             if ($sender->id === $receiverId) {
-                throw new RuntimeException('Cannot transfer to the same user.');
+                throw new CannotTransferToSelf('Cannot transfer to the same user.');
             }
 
             $amount = $this->normalizeAmount($amount);
             if ($amount === '0.00') {
-                throw new RuntimeException('Amount must be greater than zero.');
+                throw new AmountMustBeGreaterThanZero('Amount must be greater than zero.');
             }
 
             $orderedIds = [$sender->id, $receiverId];
@@ -52,10 +56,10 @@ class TransferService
             $locked = User::whereIn('id', $orderedIds)->lockForUpdate()->get()->keyBy('id')->all();
 
             if (! isset($locked[$sender->id])) {
-                throw new RuntimeException('Sender not found.');
+                throw new SenderNotFound('Sender not found.');
             }
             if (! isset($locked[$receiverId])) {
-                throw new RuntimeException('Receiver not found.');
+                throw new ReceiverNotFound('Receiver not found.');
             }
 
             /** @var User $lockedSender */
@@ -108,7 +112,7 @@ class TransferService
     {
         $amount = trim($amount);
         if (! preg_match('/^\d+(\.\d{1,2})?$/', $amount)) {
-            throw new RuntimeException('Invalid amount format.');
+            throw new InvalidAmountFormat('Invalid amount format.');
         }
         if (! str_contains($amount, '.')) {
             return $amount.'.00';

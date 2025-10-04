@@ -2,7 +2,12 @@
 
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Wallet\Exceptions\AmountMustBeGreaterThanZero;
+use App\Services\Wallet\Exceptions\CannotTransferToSelf;
 use App\Services\Wallet\Exceptions\InsufficientFunds;
+use App\Services\Wallet\Exceptions\InvalidAmountFormat;
+use App\Services\Wallet\Exceptions\ReceiverNotFound;
+use App\Services\Wallet\Exceptions\SenderNotFound;
 use App\Services\Wallet\TransferService;
 use Illuminate\Support\Str; // import for idempotency key
 
@@ -87,4 +92,69 @@ it('is idempotent when idempotency key provided', function () {
     // Commission 1.5% of 20.00 = 0.30 => total debit 20.30
     expect($sender->balance)->toBe('29.70');
     expect($receiver->balance)->toBe('20.00');
+});
+
+// New tests for remaining domain-specific exceptions
+it('throws CannotTransferToSelf when sender and receiver are the same', function () {
+    $user = User::factory()->create(['balance' => '10.00']);
+
+    /** @var TransferService $service */
+    $service = app(TransferService::class);
+
+    expect(fn () => $service->transfer($user, $user->id, '1.00'))
+        ->toThrow(CannotTransferToSelf::class);
+});
+
+it('throws AmountMustBeGreaterThanZero when amount is zero', function () {
+    $sender = User::factory()->create(['balance' => '5.00']);
+    $receiver = User::factory()->create(['balance' => '0.00']);
+
+    /** @var TransferService $service */
+    $service = app(TransferService::class);
+
+    expect(fn () => $service->transfer($sender, $receiver->id, '0.00'))
+        ->toThrow(AmountMustBeGreaterThanZero::class);
+});
+
+it('throws InvalidAmountFormat for malformed amount input', function () {
+    $sender = User::factory()->create(['balance' => '5.00']);
+    $receiver = User::factory()->create(['balance' => '0.00']);
+
+    /** @var TransferService $service */
+    $service = app(TransferService::class);
+
+    expect(fn () => $service->transfer($sender, $receiver->id, '10.999'))
+        ->toThrow(InvalidAmountFormat::class);
+});
+
+it('throws ReceiverNotFound when receiver does not exist', function () {
+    $sender = User::factory()->create(['balance' => '5.00']);
+    $nonExistentId = 999999; // high id unlikely to exist in fresh DB
+
+    /** @var TransferService $service */
+    $service = app(TransferService::class);
+
+    expect(fn () => $service->transfer($sender, $nonExistentId, '1.00'))
+        ->toThrow(ReceiverNotFound::class);
+});
+
+it('throws SenderNotFound when sender row is deleted before transfer', function () {
+    $sender = User::factory()->create(['balance' => '5.00']);
+    $receiver = User::factory()->create(['balance' => '0.00']);
+
+    // Delete sender record to simulate race condition between acquiring model and processing
+    $senderId = $sender->id;
+    $sender->delete();
+
+    /** @var TransferService $service */
+    $service = app(TransferService::class);
+
+    // Use a stale model instance still carrying the old id
+    expect(fn () => $service->transfer($sender, $receiver->id, '1.00'))
+        ->toThrow(SenderNotFound::class);
+
+    // Ensure receiver unchanged and no transaction created
+    $receiver->refresh();
+    expect($receiver->balance)->toBe('0.00');
+    expect(Transaction::count())->toBe(0);
 });
