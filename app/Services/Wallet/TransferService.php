@@ -59,7 +59,7 @@ class TransferService
             }
 
             /** @var User $lockedSender */
-            $lockedSender =  [$sender->id];
+            $lockedSender = $locked[$sender->id];
             /** @var User $lockedReceiver */
             $lockedReceiver = $locked[$receiverId];
 
@@ -100,7 +100,6 @@ class TransferService
             return $transaction;
         });
     }
-
 
     /**
      * Normalize input amount to strict scale=2 decimal string.
