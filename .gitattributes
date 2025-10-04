@@ -1,11 +1,19 @@
+# Enforce consistent LF line endings for text files
 * text=auto eol=lf
 
-*.blade.php diff=html
-*.css diff=css
-*.html diff=html
-*.md diff=markdown
-*.php diff=php
+# Treat these as text explicitly
+*.js text eol=lf
+*.vue text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.php text eol=lf
 
-/.github export-ignore
-CHANGELOG.md export-ignore
-.styleci.yml export-ignore
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg binary
+
