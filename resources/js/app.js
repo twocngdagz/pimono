@@ -6,13 +6,13 @@ import LoginView from './Pages/LoginView.vue';
 import Dashboard from './Pages/Dashboard.vue';
 
 const routes = [
-    { path: '/', name: 'login', component: LoginView },
-    { path: '/dashboard', name: 'dashboard', component: Dashboard },
+  { path: '/', name: 'login', component: LoginView },
+  { path: '/dashboard', name: 'dashboard', component: Dashboard },
 ];
 
 const router = createRouter({
-    history: createWebHistory(),
-    routes,
+  history: createWebHistory(),
+  routes,
 });
 
 createApp(App).use(router).mount('#app');
