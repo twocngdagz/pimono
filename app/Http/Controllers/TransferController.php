@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\TransferCompleted;
 use App\Http\Requests\TransferRequest;
 use App\Services\Wallet\TransferService;
 use Illuminate\Http\JsonResponse;
+
+use function broadcast;
 
 class TransferController extends Controller
 {
@@ -16,6 +19,9 @@ class TransferController extends Controller
         $idempotencyKey = $request->input('idempotency_key');
 
         $tx = $service->transfer($sender, $receiverId, $amount, $idempotencyKey);
+
+        // Broadcast to sender & receiver private channels (excluding origin socket)
+        broadcast(new TransferCompleted($tx))->toOthers();
 
         return response()->json([
             'data' => [

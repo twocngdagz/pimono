@@ -5,9 +5,24 @@
         <h1 class="text-xl font-semibold tracking-tight">
           <router-link to="/">PiMono</router-link>
         </h1>
-        <div class="space-x-4 text-sm">
-          <router-link class="hover:underline" to="/">Login</router-link>
-          <router-link class="hover:underline" to="/dashboard">Dashboard</router-link>
+        <div class="flex items-center gap-4 text-sm">
+          <template v-if="isAuthenticated">
+            <router-link class="hover:underline" to="/dashboard">Dashboard</router-link>
+            <span v-if="currentUser && currentUser.name" class="text-gray-500"
+              >Hi, {{ currentUser.name }}</span
+            >
+            <button
+              type="button"
+              class="text-red-600 hover:underline"
+              data-test="logout-btn"
+              @click="handleLogout"
+            >
+              Logout
+            </button>
+          </template>
+          <template v-else>
+            <router-link class="hover:underline" to="/">Login</router-link>
+          </template>
         </div>
       </nav>
     </header>
@@ -18,6 +33,17 @@
   </div>
 </template>
 
-<script setup></script>
+<script setup>
+import { useRouter } from 'vue-router';
+import { isAuthenticated, logout, currentUser } from './auth';
+
+const router = useRouter();
+
+async function handleLogout() {
+  await logout();
+  // After logout, redirect to login route root
+  router.push({ name: 'login' });
+}
+</script>
 
 <style scoped></style>
