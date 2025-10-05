@@ -15,13 +15,13 @@ import axios from 'axios';
 import BalanceCard from '../components/BalanceCard.vue';
 import TransferForm from '../components/TransferForm.vue';
 import TransactionsList from '../components/TransactionsList.vue';
-import { ensureAuthFetched } from '../auth';
-import { currentUser } from '../auth';
+import { ensureAuthFetched, currentUser } from '../auth';
 
 const userId = ref(null);
 const balance = ref('0.00');
 const transactions = ref([]);
-let channel = null;
+let channel = null; // Echo channel reference
+const processedTxIds = new Set();
 
 const numericBalance = computed(() => parseFloat(balance.value));
 
@@ -33,24 +33,58 @@ async function fetchUser() {
 }
 
 async function fetchTransactions() {
-  const res = await axios.get('/api/transactions');
-  balance.value = res.data.data.balance;
-  transactions.value = res.data.data.transactions;
+  try {
+    const res = await axios.get('/api/transactions');
+    balance.value = res.data.data.balance;
+    transactions.value = res.data.data.transactions;
+  } catch (e) {
+    console.warn('[Dashboard] Failed to fetch transactions', e?.response?.data || e.message);
+  }
+}
+
+function handleEvent(e, source = 'primary') {
+  console.log(`[Dashboard] (${source}) TransferCompleted raw event`, e);
+  if (!e?.transaction) return;
+  if (processedTxIds.has(e.transaction.id)) {
+    console.log('[Dashboard] Duplicate transaction ignored', e.transaction.id);
+    return;
+  }
+  processedTxIds.add(e.transaction.id);
+  const uid = Number(userId.value);
+  if (e.sender_balance && uid === e.transaction.sender_id) {
+    balance.value = e.sender_balance;
+  } else if (e.receiver_balance && uid === e.transaction.receiver_id) {
+    balance.value = e.receiver_balance;
+  }
+  const direction = Number(e.transaction.sender_id) === uid ? 'out' : 'in';
+  transactions.value.unshift({ ...e.transaction, direction });
 }
 
 function subscribe() {
-  if (!window.Echo || !userId.value) return;
-  channel = window.Echo.private(`user.${userId.value}`).listen('.TransferCompleted', (e) => {
-    // e.transaction + sender_balance / receiver_balance
-    if (!userId.value) return;
-    if (e.sender_balance && parseFloat(userId.value) === e.transaction.sender_id) {
-      balance.value = e.sender_balance;
-    } else if (e.receiver_balance && parseFloat(userId.value) === e.transaction.receiver_id) {
-      balance.value = e.receiver_balance;
-    }
-    const direction = e.transaction.sender_id === userId.value ? 'out' : 'in';
-    transactions.value.unshift({ ...e.transaction, direction });
-  });
+  if (!window.Echo) {
+    return setTimeout(subscribe, 300);
+  }
+  if (!userId.value) {
+    return;
+  }
+  const privateName = `user.${userId.value}`;
+  try {
+    channel = window.Echo.private(privateName)
+      .listen('.TransferCompleted', (e) => handleEvent(e, 'dot.name'))
+
+    const bindInternal = (attempt = 0) => {
+      const internal = window.Echo.connector?.pusher?.channel(`private-${privateName}`);
+      if (!internal) {
+        if (attempt < 20) {
+          return setTimeout(() => bindInternal(attempt + 1), 150);
+        }
+        return;
+      }
+    };
+    bindInternal();
+  } catch (err) {
+    console.error('[Dashboard] Error subscribing', err);
+  }
 }
 
 async function bootstrap() {

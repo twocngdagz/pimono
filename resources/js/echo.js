@@ -1,11 +1,16 @@
-import { configureEcho } from '@laravel/echo-vue';
+import { configureEcho, echo as getEcho } from '@laravel/echo-vue';
+import Pusher from 'pusher-js';
+window.Pusher = Pusher;
+
 
 configureEcho({
+  broadcaster: 'pusher',
   key: import.meta.env.VITE_PUSHER_APP_KEY,
   cluster: import.meta.env.VITE_PUSHER_APP_CLUSTER,
   forceTLS: true,
-  // wsHost: import.meta.env.VITE_PUSHER_HOST,
-  // wsPort: import.meta.env.VITE_PUSHER_PORT,
-  // wssPort: import.meta.env.VITE_PUSHER_PORT,
-  // enabledTransports: ["ws", "wss"],
 });
+
+// Create the Echo instance (echo-vue does not attach to window automatically)
+// and expose it so legacy code using window.Echo continues to work.
+// This mirrors the classic pattern shown in Laravel docs for plain JS.
+window.Echo = getEcho();
