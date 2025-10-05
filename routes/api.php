@@ -10,8 +10,6 @@ Route::get('/user', function (Request $request) {
 })->middleware('auth:sanctum');
 
 Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/transfer', [TransferController::class, 'store']);
-
     Route::get('/transactions', [TransactionController::class, 'index']);
     Route::post('/transactions', [TransferController::class, 'store']);
 });

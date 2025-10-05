@@ -15,7 +15,7 @@ it('returns 201 and transaction data on successful transfer', function () {
 
     actingAs($sender, 'sanctum');
 
-    $response = postJson('/api/transfer', [
+    $response = postJson('/api/transactions', [
         'receiver_id' => $receiver->id,
         'amount' => '10.00',
     ]);
@@ -37,7 +37,7 @@ it('validates receiver_id is required', function () {
     $sender = User::factory()->create(['balance' => '10.00']);
     actingAs($sender, 'sanctum');
 
-    $response = postJson('/api/transfer', [
+    $response = postJson('/api/transactions', [
         // 'receiver_id' missing
         'amount' => '1.00',
     ]);
@@ -50,7 +50,7 @@ it('validates receiver must differ from sender', function () {
     $sender = User::factory()->create(['balance' => '10.00']);
     actingAs($sender, 'sanctum');
 
-    $response = postJson('/api/transfer', [
+    $response = postJson('/api/transactions', [
         'receiver_id' => $sender->id,
         'amount' => '1.00',
     ]);
@@ -65,7 +65,7 @@ it('validates amount format (too many decimals)', function () {
     $receiver = User::factory()->create(['balance' => '0.00']);
     actingAs($sender, 'sanctum');
 
-    $response = postJson('/api/transfer', [
+    $response = postJson('/api/transactions', [
         'receiver_id' => $receiver->id,
         'amount' => '1.234',
     ]);
@@ -79,7 +79,7 @@ it('validates amount minimum (zero)', function () {
     $receiver = User::factory()->create(['balance' => '0.00']);
     actingAs($sender, 'sanctum');
 
-    $response = postJson('/api/transfer', [
+    $response = postJson('/api/transactions', [
         'receiver_id' => $receiver->id,
         'amount' => '0.00',
     ]);
@@ -94,7 +94,7 @@ it('returns 422 with domain error on insufficient funds', function () {
     $receiver = User::factory()->create(['balance' => '0.00']);
     actingAs($sender, 'sanctum');
 
-    $response = postJson('/api/transfer', [
+    $response = postJson('/api/transactions', [
         'receiver_id' => $receiver->id,
         'amount' => '1.00', // requires 1.02 including commission
     ]);
@@ -113,14 +113,14 @@ it('returns 422 on idempotency conflict with different parameters', function () 
     $key = (string) Str::uuid();
 
     // First successful transfer
-    postJson('/api/transfer', [
+    postJson('/api/transactions', [
         'receiver_id' => $receiver->id,
         'amount' => '5.00',
         'idempotency_key' => $key,
     ])->assertCreated();
 
     // Second attempt with different amount -> conflict
-    $response = postJson('/api/transfer', [
+    $response = postJson('/api/transactions', [
         'receiver_id' => $receiver->id,
         'amount' => '6.00',
         'idempotency_key' => $key,
@@ -137,7 +137,7 @@ it('validates negative amount as invalid format', function () {
     $receiver = User::factory()->create(['balance' => '0.00']);
     actingAs($sender, 'sanctum');
 
-    $response = postJson('/api/transfer', [
+    $response = postJson('/api/transactions', [
         'receiver_id' => $receiver->id,
         'amount' => '-5.00',
     ]);
