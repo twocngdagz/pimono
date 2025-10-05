@@ -116,16 +116,48 @@ php artisan queue:work
 - Commission = 1.5% of amount (sender only). Example: send 100.00 → sender debited 101.50, receiver credited 100.00.
 - Integer cents math; half-up rounding for commission.
 - Balances stored (not recalculated from history) for O(1) reads.
-- Idempotency: identical (sender, receiver, amount) + same key returns original; differing parameters → 422.
+- Idempotency: identical (sender, receiver, amount) + same key returns original; differing parameters → 409 conflict.
 
-### Domain Error Schema
+### 5.1 Domain Error Schema (Wallet Exceptions)
 ```json
 {
   "error": "Insufficient balance to perform transfer.",
-  "type": "InsufficientFunds"
+  "type": "InsufficientFunds",
+  "code": "wallet.insufficient_funds"
 }
 ```
-Validation errors use Laravel’s standard JSON structure.
+Fields:
+- error: Human-readable message (English, not yet localized)
+- type: Exception class basename (stable for this test project)
+- code: Machine-readable snake_case code namespaced with `wallet.` prefix
+
+Validation errors (input field validation) still use Laravel's default shape:
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": {
+    "amount": ["Amount must be at least 0.01."]
+  }
+}
+```
+
+### 5.2 Exception → HTTP Status Mapping
+| Exception | HTTP Status | code value | Rationale |
+|-----------|-------------|-----------|-----------|
+| InvalidAmountFormat | 400 Bad Request | wallet.invalid_amount_format | Syntactic/format issue with amount field |
+| AmountMustBeGreaterThanZero | 400 Bad Request | wallet.amount_must_be_greater_than_zero | Numeric value provided but violates minimum semantic constraint |
+| CannotTransferToSelf | 422 Unprocessable Entity | wallet.cannot_transfer_to_self | Payload structurally valid; business rule violation |
+| InsufficientFunds | 422 Unprocessable Entity | wallet.insufficient_funds | Request understood; cannot apply due to current balance state |
+| ReceiverNotFound | 422 Unprocessable Entity | wallet.receiver_not_found | Referenced receiver_id not usable (treated as semantic failure, not URL resource) |
+| SenderNotFound | 422 Unprocessable Entity | wallet.sender_not_found | (Extremely rare) sender row missing mid-process |
+| IdempotencyConflict | 409 Conflict | wallet.idempotency_conflict | Same idempotency key reused with different parameters |
+| (Any future WalletException w/out override) | 422 Unprocessable Entity | wallet.<dynamic> | Default domain rule failure |
+
+Implementation details:
+- Each exception extends `WalletException` and may override `httpStatus()`.
+- Global renderer (see `bootstrap/app.php`) calls `httpStatus()` + `errorCode()` to produce unified envelope.
+- Machine codes are generated via snake_case of class name prefixed with `wallet.` (e.g., `wallet.insufficient_funds`).
+- Idempotent replay with identical parameters returns the first transaction (status 201 retained for demo); conflict only when parameters differ.
 
 ## 6. Concurrency & Integrity
 | Concern | Approach |

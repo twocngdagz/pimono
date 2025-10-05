@@ -89,15 +89,16 @@ it('maps SenderNotFound to 422 JSON response', function () {
         ]);
 });
 
-it('maps IdempotencyConflict to 422 JSON response', function () {
+it('maps IdempotencyConflict to 409 JSON response', function () {
     Route::post('/_test/ex/idempotency', function () {
         throw new IdempotencyConflict('Idempotency key reused with different parameters.');
     });
 
     $response = postJson('/_test/ex/idempotency');
-    $response->assertStatus(422)
+    $response->assertStatus(409)
         ->assertJson([
             'error' => 'Idempotency key reused with different parameters.',
             'type' => 'IdempotencyConflict',
+            'code' => 'wallet.idempotency_conflict',
         ]);
 });

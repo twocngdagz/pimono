@@ -1,7 +1,5 @@
 <?php
 
-use App\Services\Wallet\Exceptions\AmountMustBeGreaterThanZero;
-use App\Services\Wallet\Exceptions\InvalidAmountFormat;
 use App\Services\Wallet\Exceptions\WalletException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -19,15 +17,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->statefulApi();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        $exceptions->render(function (WalletException $e) {
-            $status = match (true) {
-                $e instanceof InvalidAmountFormat, $e instanceof AmountMustBeGreaterThanZero => 400,
-                default => 422,
-            };
+        $exceptions->render(function (WalletException $e, $request) {
+            $status = $e->httpStatus();
 
             return response()->json([
                 'error' => $e->getMessage(),
                 'type' => class_basename($e),
+                'code' => $e->errorCode(),
             ], $status);
         });
     })

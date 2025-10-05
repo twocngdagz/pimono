@@ -105,7 +105,7 @@ it('returns 422 with domain error on insufficient funds', function () {
         ]);
 });
 
-it('returns 422 on idempotency conflict with different parameters', function () {
+it('returns 409 on idempotency conflict with different parameters', function () {
     $sender = User::factory()->create(['balance' => '30.00']);
     $receiver = User::factory()->create(['balance' => '0.00']);
     actingAs($sender, 'sanctum');
@@ -126,9 +126,10 @@ it('returns 422 on idempotency conflict with different parameters', function () 
         'idempotency_key' => $key,
     ]);
 
-    $response->assertStatus(422)
+    $response->assertStatus(409)
         ->assertJson([
             'type' => 'IdempotencyConflict',
+            'code' => 'wallet.idempotency_conflict',
         ]);
 });
 
