@@ -1,61 +1,272 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Mini Wallet (High-Concurrency Demo)
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A simplified digital wallet API + SPA (Laravel 12 + Vue 3) focused on MySQL for high‑concurrency balance updates, idempotent transfers, and real‑time broadcasting.
 
-## About Laravel
+## 1. Features
+- POST `/api/transactions` – create transfer
+- GET `/api/transactions` – recent history (incoming + outgoing) + current balance
+- Atomic debit/credit with `SELECT ... FOR UPDATE`
+- Commission (1.5%) rounding half‑up to nearest cent (sender‑paid)
+- Optional `idempotency_key` for safe retries
+- Real‑time updates to both sender & receiver over `private-user.{id}` channels
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## 2. Tech Stack
+- Backend: Laravel 12 (PHP 8.3)
+- Frontend: Vue 3 (Composition API) + Vite
+- Database: MySQL 8.x (SQLite used only internally for automated tests)
+- Auth: Laravel Sanctum
+- Real-time: Pusher Channels
+- Queue / Sessions / Cache: Database (Redis optional for future optimization)
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## 3. Quick Start (Docker + MySQL)
+```bash
+# 1. Clone
+git clone <repo-url> mini-wallet && cd mini-wallet
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+# 2. Copy environment file (includes MySQL defaults)
+cp .env.example .env
+# Defaults (already set):
+# DB_CONNECTION=mysql
+# DB_HOST=127.0.0.1
+# DB_PORT=3306
+# DB_DATABASE=wallet
+# DB_USERNAME=root
+# DB_PASSWORD=
 
-## Learning Laravel
+# 3. Start infrastructure (MySQL + Redis containers provision DB & user automatically)
+docker compose up -d mysql redis
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+# 4. Install PHP dependencies
+composer install
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+# 5. Generate app key
+php artisan key:generate
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+# 6. Run migrations & (optional) seed demo data
+php artisan migrate --force
+php artisan db:seed --class=DatabaseSeeder  # optional if DEMO_SEED=true
 
-## Laravel Sponsors
+# 7. Install JS deps & build (or use dev server)
+npm install
+npm run build   # or: npm run dev
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+# 8. Serve API + frontend
+php artisan serve
+```
+App available at: http://localhost:8000
 
-### Premium Partners
+### 3.1 Running WITHOUT Docker (Local MySQL)
+If you prefer your own local MySQL server, you have two options:
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+Option A (quick – reuse existing root user, blank password):
+1. Ensure your local MySQL server is running.
+2. Create the database only (no user creation needed):
+```sql
+CREATE DATABASE IF NOT EXISTS wallet CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+3. Update `.env` (override the defaults) to match your root credentials:
+```
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=wallet
+DB_USERNAME=root
+DB_PASSWORD=
+```
+4. Continue with install, migrate, (optional) seed, and serve steps.
 
-## Contributing
+Option B (isolated demo user – as provided in .env.example):
+```sql
+CREATE DATABASE wallet CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'wallet'@'%' IDENTIFIED BY 'secret';
+GRANT ALL PRIVILEGES ON wallet.* TO 'wallet'@'%';
+FLUSH PRIVILEGES;
+```
+Leave `.env` defaults as-is for this option.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Then (either option):
+```bash
+composer install
+php artisan key:generate
+php artisan migrate --force
+php artisan db:seed --class=DatabaseSeeder
+npm install && npm run dev &
+php artisan serve
+```
 
-## Code of Conduct
+Note on queues: A queue worker is NOT required for broadcasting right now because `TransferCompleted` implements `ShouldBroadcastNow`, which sends the event synchronously during the HTTP request. Start a queue worker only if you later (a) switch the event to `ShouldBroadcast` for async dispatch, or (b) introduce queued jobs (emails, cleanup, heavy tasks):
+```bash
+php artisan queue:work
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## 4. Environment Variables (Key)
+| Variable | Default in .env.example | Purpose |
+|----------|-------------------------|---------|
+| DB_CONNECTION | mysql | Must remain mysql (tests override to sqlite) |
+| DB_HOST | 127.0.0.1 | MySQL host (container or local) |
+| DB_PORT | 3306 | MySQL port |
+| DB_DATABASE | wallet | Schema name (create manually if using root) |
+| DB_USERNAME | wallet | Use `root` (with blank password) if you prefer – adjust `.env` |
+| DB_PASSWORD | secret | Blank if using root with no password |
+| PUSHER_APP_KEY / SECRET / APP_ID | (placeholders) | Real-time broadcasting credentials |
+| BROADCAST_CONNECTION | pusher | Set to log in tests automatically |
+| DEMO_* | (see table) | Control demo seeding volumes |
 
-## Security Vulnerabilities
+## 5. Transfer Semantics
+- Commission = 1.5% of amount (sender only). Example: send 100.00 → sender debited 101.50, receiver credited 100.00.
+- Integer cents math; half-up rounding for commission.
+- Balances stored (not recalculated from history) for O(1) reads.
+- Idempotency: identical (sender, receiver, amount) + same key returns original; differing parameters → 422.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+### Domain Error Schema
+```json
+{
+  "error": "Insufficient balance to perform transfer.",
+  "type": "InsufficientFunds"
+}
+```
+Validation errors use Laravel’s standard JSON structure.
 
-## License
+## 6. Concurrency & Integrity
+| Concern | Approach |
+|---------|----------|
+| Race conditions | Row locking (FOR UPDATE) on sender & receiver inside one transaction |
+| Deadlocks | Deterministic ordering (ascending user IDs) |
+| Double submit | Optional idempotency key reuse returns original transaction |
+| Rollback safety | Debit, credit, and transaction insert are atomic |
+| Scalability | Stored balance avoids scanning large transaction table |
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Future enhancement: double-entry ledger for full audit and reconciliation.
+
+## 7. Real-Time Flow
+1. Transfer persists balances + transaction.
+2. `TransferCompleted` event broadcasts immediately to sender & receiver channels.
+3. Frontend appends transaction and updates balances live.
+
+## 8. Running Tests
+Tests use in-memory SQLite (no MySQL needed):
+```bash
+composer test
+```
+Full verification (style + static analysis + tests):
+```bash
+composer verify
+```
+
+## 9. Demo Seeding
+Adjust volumes via `.env` (e.g., `DEMO_USERS`, `DEMO_TRANSFERS`).
+Seed:
+```bash
+php artisan db:seed --class=DatabaseSeeder
+```
+
+### 9.1 Seeding Environment Variables Explained
+| Variable | Type | Default | Applies To | Description |
+|----------|------|---------|------------|-------------|
+| DEMO_SEED | bool | true | DemoDataSeeder | When true (and not production or tests) seeds the standard demo dataset (moderate size). |
+| DEMO_USERS | int | 20 | DemoDataSeeder | Number of additional random demo users (excluding base Alice/Bob/Charlie + Whale). |
+| DEMO_TRANSFERS | int | 200 | DemoDataSeeder | Approximate count of random successful transfers to generate transaction depth. |
+| DEMO_FAILED | int | 5 | DemoDataSeeder | Number of synthetic FAILED transactions inserted (status='failed'). |
+| DEMO_BIG_TRANSFERS | csv decimal list | 1000.00,25000.00,99999.99 | DemoDataSeeder | Large transfer amounts executed from Whale user to random users. |
+| DEMO_SEED_MAX | bool | false | LargeDemoDataSeeder | When true (and not production or tests) runs the large volume seeder AFTER the standard one (unless DEMO_SEED=false). |
+| DEMO_USERS_MAX | int | 250 | LargeDemoDataSeeder | Additional high-volume users to create (labelled Load User N). |
+| DEMO_TRANSFERS_MAX | int | 7500 | LargeDemoDataSeeder | Additional random successful transfers (larger range). |
+| DEMO_FAILED_MAX | int | 150 | LargeDemoDataSeeder | Additional FAILED transactions for large dataset. |
+| DEMO_BIG_TRANSFERS_MAX | csv decimal list | 50000.00,125000.00,250000.00,500000.00 | LargeDemoDataSeeder | Very large transfer amounts from Mega Whale to random users. |
+
+#### Behavior Notes
+- Order: `DemoDataSeeder` runs first if `DEMO_SEED=true`, then `LargeDemoDataSeeder` runs if `DEMO_SEED_MAX=true`.
+- Combined Datasets: If both are enabled you get the sum (standard + large). To get only the large dataset, set `DEMO_SEED=false` and `DEMO_SEED_MAX=true`.
+- Production Safety: Both seeders are skipped automatically in production and during unit tests regardless of flags.
+- Failed Transactions: These are manually inserted to demonstrate a `failed` status. They do not affect balances because balance mutations happen only through successful transfers inside the service layer.
+- Whale / Mega Whale: High-balance users used to guarantee successful large transfers independent of random user balances.
+
+#### Example Configurations
+Minimal seed (only base 3 users + Whale, no extras):
+```bash
+DEMO_SEED=false
+DEMO_SEED_MAX=false
+```
+Standard mid-size demo (defaults – you can omit since these are in .env.example):
+```bash
+DEMO_SEED=true
+DEMO_USERS=20
+DEMO_TRANSFERS=200
+DEMO_FAILED=5
+DEMO_SEED_MAX=false
+```
+Large-only using max defaults (skip normal, use large dataset defaults):
+```bash
+DEMO_SEED=false
+DEMO_SEED_MAX=true
+DEMO_USERS_MAX=250
+DEMO_TRANSFERS_MAX=7500
+```
+Both (aggregate default + large defaults):
+```bash
+DEMO_SEED=true
+DEMO_SEED_MAX=true
+```
+Custom larger large-only example (override defaults):
+```bash
+DEMO_SEED=false
+DEMO_SEED_MAX=true
+DEMO_USERS_MAX=300
+DEMO_TRANSFERS_MAX=10000
+```
+
+### Reset & Reseed
+```bash
+php artisan migrate:fresh --seed
+```
+Override on-the-fly (one-off):
+```bash
+DEMO_SEED=false DEMO_SEED_MAX=true php artisan db:seed --class=DatabaseSeeder
+```
+
+## 10. API Examples
+Create transfer:
+```bash
+curl -X POST http://localhost:8000/api/transactions \
+  -H 'Accept: application/json' \
+  -H 'Authorization: Bearer <token>' \
+  -d 'receiver_id=2' -d 'amount=25.00' -d 'idempotency_key=6f8b1c0e-...'
+```
+List history:
+```bash
+curl -H 'Authorization: Bearer <token>' http://localhost:8000/api/transactions
+```
+
+## 11. Frontend Dev Mode
+```bash
+php artisan serve
+npm run dev
+```
+Ensure Pusher keys in `.env` if you want live broadcasting.
+
+## 12. Performance Notes
+- Integer cents logic avoids floating precision issues.
+- Minimal write set: two balance updates + one insert.
+- History query limited to recent 50 for quick UI hydration (pagination can be added later).
+
+## 13. Security Considerations
+- Sanctum guards API routes.
+- Private channel auth restricts real-time access to owner.
+- Self-transfer blocked at validation & domain layer.
+- Idempotency prevents accidental duplicate charging.
+
+## 14. Known Next Steps (Optional Improvements)
+| Area | Enhancement |
+|------|-------------|
+| Pagination | Add cursor or since_id pagination for history |
+| Rate limiting | Throttle POST transfer (e.g., `throttle:60,1`) |
+| Idempotency race | Gracefully handle rare uuid unique constraint collision |
+| Commission sink | System account / ledger entries for commission accumulation |
+| History query | UNION optimization + covering indexes for huge tables |
+
+## 15. Cleanup
+```bash
+docker compose down -v
+```
+
+---
