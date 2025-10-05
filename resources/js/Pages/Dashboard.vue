@@ -69,8 +69,9 @@ function subscribe() {
   }
   const privateName = `user.${userId.value}`;
   try {
-    channel = window.Echo.private(privateName)
-      .listen('.TransferCompleted', (e) => handleEvent(e, 'dot.name'))
+    channel = window.Echo.private(privateName).listen('.TransferCompleted', (e) =>
+      handleEvent(e, 'dot.name')
+    );
 
     const bindInternal = (attempt = 0) => {
       const internal = window.Echo.connector?.pusher?.channel(`private-${privateName}`);

@@ -2,7 +2,6 @@ import { configureEcho, echo as getEcho } from '@laravel/echo-vue';
 import Pusher from 'pusher-js';
 window.Pusher = Pusher;
 
-
 configureEcho({
   broadcaster: 'pusher',
   key: import.meta.env.VITE_PUSHER_APP_KEY,
