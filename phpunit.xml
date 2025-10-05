@@ -30,5 +30,7 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Use log driver in tests to avoid external Pusher calls -->
+        <env name="BROADCAST_CONNECTION" value="log"/>
     </php>
 </phpunit>
