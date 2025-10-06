@@ -21,6 +21,9 @@ import BalanceCard from '../components/BalanceCard.vue';
 import TransferForm from '../components/TransferForm.vue';
 import TransactionsList from '../components/TransactionsList.vue';
 import { ensureAuthFetched, currentUser } from '../auth';
+import { useNotifications } from '../notifications';
+
+const { push: pushNotification } = useNotifications();
 
 const userId = ref(null);
 const balance = ref('0.00');
@@ -92,7 +95,13 @@ function handleEvent(e) {
   }
   const direction = uid === Number(e.transaction.sender_id) ? 'out' : 'in';
   transactions.value.unshift({ ...e.transaction, direction });
-
+  if (direction === 'in') {
+    pushNotification({
+      title: 'Incoming Transfer',
+      message: `You received ${e.transaction.amount} from user #${e.transaction.sender_id}`,
+      ttl: 8000,
+    });
+  }
   if (transactions.value.length > pageLimit * 5) {
     const removed = transactions.value.splice(pageLimit * 5);
     removed.forEach((r) => processedTxIds.delete(r.id));
