@@ -5,6 +5,7 @@ namespace App\Services\Wallet;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Wallet\Exceptions\AmountMustBeGreaterThanZero;
+use App\Services\Wallet\Exceptions\AmountTooLarge;
 use App\Services\Wallet\Exceptions\CannotTransferToSelf;
 use App\Services\Wallet\Exceptions\IdempotencyConflict;
 use App\Services\Wallet\Exceptions\InsufficientFunds;
@@ -70,11 +71,23 @@ class TransferService
             $lockedSender = $locked[$sender->id];
             $lockedReceiver = $locked[$receiverId];
 
+            $senderBalanceNormalized = $this->normalizeAmount((string) $lockedSender->balance);
+            if ($this->compareNormalizedAmounts($amount, $senderBalanceNormalized) === 1) {
+                throw new InsufficientFunds('Insufficient balance to perform transfer.');
+            }
+
+            $this->assertRepresentableOrThrow($amount);
+
             $amountCents = $this->toCents($amount);
-            $senderBalanceCents = $this->toCents($this->normalizeAmount((string) $lockedSender->balance));
+            $senderBalanceCents = $this->toCents($senderBalanceNormalized);
             $receiverBalanceCents = $this->toCents($this->normalizeAmount((string) $lockedReceiver->balance));
 
             $commissionCents = $this->calculateCommissionCents($amountCents);
+
+            // Check for addition overflow (amount + commission) exceeding PHP_INT_MAX
+            if ($commissionCents > PHP_INT_MAX - $amountCents) {
+                throw new AmountTooLarge('Amount exceeds maximum representable value.');
+            }
             $commission = $this->centsToString($commissionCents);
             $totalDebitCents = $amountCents + $commissionCents;
             if ($senderBalanceCents < $totalDebitCents) {
@@ -145,8 +158,13 @@ class TransferService
     private function toCents(string $amount): int
     {
         [$int, $frac] = explode('.', $amount, 2);
+        $centsStr = $int.$frac;
+        $maxStr = (string) PHP_INT_MAX;
+        if (strlen($centsStr) < strlen($maxStr) || (strlen($centsStr) === strlen($maxStr) && $centsStr <= $maxStr)) {
+            return (int) $centsStr;
+        }
 
-        return ((int) $int) * 100 + (int) $frac;
+        throw new AmountTooLarge('Amount exceeds maximum representable value.');
     }
 
     /**
@@ -168,8 +186,67 @@ class TransferService
      */
     private function calculateCommissionCents(int $amountCents): int
     {
-        $numerator = $amountCents * 15;
 
-        return intdiv($numerator + 500, 1000);
+        $q = intdiv($amountCents, 1000);
+        $r = $amountCents - ($q * 1000);
+
+        $partial = $r * 15 + 500;
+
+        return $q * 15 + intdiv($partial, 1000);
+    }
+
+    /**
+     * Compare two normalized (scale=2) decimal strings.
+     * Returns -1 if a<b, 0 if equal, 1 if a>b.
+     */
+    private function compareNormalizedAmounts(string $a, string $b): int
+    {
+        [$ai, $af] = explode('.', $a, 2);
+        [$bi, $bf] = explode('.', $b, 2);
+
+        $lenCmp = strlen($ai) <=> strlen($bi);
+        if ($lenCmp !== 0) {
+            return $lenCmp;
+        }
+        $intCmp = strcmp($ai, $bi);
+        if ($intCmp !== 0) {
+            return $intCmp < 0 ? -1 : 1;
+        }
+        $fracCmp = strcmp($af, $bf);
+        if ($fracCmp === 0) {
+            return 0;
+        }
+
+        return $fracCmp < 0 ? -1 : 1;
+    }
+
+    /**
+     * Ensure amount can be represented internally in integer cents without 64-bit overflow.
+     * Throws AmountTooLarge only if caller already confirmed sender can afford the raw amount.
+     */
+    private function assertRepresentableOrThrow(string $amount): void
+    {
+        [$int, $frac] = explode('.', $amount, 2);
+        $limitIntPart = intdiv(PHP_INT_MAX, 100);
+        $remainder = PHP_INT_MAX - ($limitIntPart * 100);
+
+        $limitStr = (string) $limitIntPart;
+        if (strlen($int) < strlen($limitStr)) {
+            return;
+        }
+        if (strlen($int) > strlen($limitStr)) {
+            throw new AmountTooLarge('Amount exceeds maximum representable value.');
+        }
+        if ($int < $limitStr) {
+            return; // smaller integer part => safe
+        }
+        if ($int > $limitStr) {
+            throw new AmountTooLarge('Amount exceeds maximum representable value.');
+        }
+
+        $fracInt = (int) $frac;
+        if ($fracInt > $remainder) {
+            throw new AmountTooLarge('Amount exceeds maximum representable value.');
+        }
     }
 }
