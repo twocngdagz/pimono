@@ -3,12 +3,15 @@
 A simplified digital wallet API + SPA (Laravel 12 + Vue 3) focused on MySQL for high‑concurrency balance updates, idempotent transfers, and real‑time broadcasting.
 
 ## 1. Features
-- POST `/api/transactions` – create transfer
+- POST `/api/transactions` – create transfer (idempotent with automatic client key)
 - GET `/api/transactions` – recent history (incoming + outgoing) + current balance
 - Atomic debit/credit with `SELECT ... FOR UPDATE`
 - Commission (1.5%) rounding half‑up to nearest cent (sender‑paid)
-- Optional `idempotency_key` for safe retries
+- Automatic idempotency key generation on frontend (UUID v4) sent via `Idempotency-Key` header
+- Idempotent replay returns cached result (200 OK + `Idempotent-Replay: true` header)
 - Real‑time updates to both sender & receiver over `private-user.{id}` channels
+- Per-request correlation via `X-Request-ID` header (auto-generated if absent)
+- Basic rate limiting on transfer endpoint (`throttle:60,1`)
 
 ## 2. Tech Stack
 - Backend: Laravel 12 (PHP 8.3)
@@ -116,20 +119,22 @@ php artisan queue:work
 - Commission = 1.5% of amount (sender only). Example: send 100.00 → sender debited 101.50, receiver credited 100.00.
 - Integer cents math; half-up rounding for commission.
 - Balances stored (not recalculated from history) for O(1) reads.
-- Idempotency: identical (sender, receiver, amount) + same key returns original; differing parameters → 409 conflict.
+- Idempotency:
+  - First successful request with a new key → 201 Created.
+  - Exact replay (same key + same sender/receiver/amount) → 200 OK with body `idempotent_replay: true` and response header `Idempotent-Replay: true`.
+  - Same key + different parameters → 409 Conflict (IdempotencyConflict).
 
 ### 5.1 Domain Error Schema (Wallet Exceptions)
 ```json
 {
   "error": "Insufficient balance to perform transfer.",
   "type": "InsufficientFunds",
-  "code": "wallet.insufficient_funds"
+  "code": "wallet.insufficient_funds",
+  "request_id": "a7e6f1c2-..."
 }
 ```
-Fields:
-- error: Human-readable message (English, not yet localized)
-- type: Exception class basename (stable for this test project)
-- code: Machine-readable snake_case code namespaced with `wallet.` prefix
+Added field:
+- request_id: Correlation ID for this HTTP attempt (matches `X-Request-ID` header)
 
 Validation errors (input field validation) still use Laravel's default shape:
 ```json
@@ -157,7 +162,33 @@ Implementation details:
 - Each exception extends `WalletException` and may override `httpStatus()`.
 - Global renderer (see `bootstrap/app.php`) calls `httpStatus()` + `errorCode()` to produce unified envelope.
 - Machine codes are generated via snake_case of class name prefixed with `wallet.` (e.g., `wallet.insufficient_funds`).
-- Idempotent replay with identical parameters returns the first transaction (status 201 retained for demo); conflict only when parameters differ.
+- Idempotent replay returns HTTP 200 OK + `Idempotent-Replay: true`; original creation returns 201.
+
+### 5.3 Idempotency & Request IDs
+| Aspect | Mechanism |
+|--------|-----------|
+| Client key generation | Frontend generates UUID v4 per submission |
+| Transport | `Idempotency-Key` header (body `idempotency_key` accepted for backward compatibility) |
+| Replay detection | Same key + identical sender/receiver/amount before or after race recovery |
+| Replay response | 200 OK, `idempotent_replay: true`, header `Idempotent-Replay: true` |
+| Conflict | 409 Conflict if parameters differ for same key |
+| Race handling | Unique constraint caught; transaction re-fetched; conflict or replay resolved deterministically |
+| Correlation | `X-Request-ID` header accepted; generated if absent; echoed back & embedded in error JSON |
+| Rate limit | `throttle:60,1` protects POST spam |
+
+Replay example (same key used twice with identical body):
+1st response: 201 Created `{ idempotent_replay: false }`
+2nd response: 200 OK `{ idempotent_replay: true }` + header `Idempotent-Replay: true`
+
+Headers involved:
+- `Idempotency-Key`: Client-supplied logical operation key.
+- `Idempotent-Replay`: Present ("true") only on a replay response.
+- `X-Request-ID`: Correlation ID per HTTP attempt (client may supply; server generates if omitted).
+
+### 5.4 Recommended Client Behavior
+- Always generate a fresh UUID for each logical transfer attempt (already implemented in provided Vue component).
+- If HTTP timeout occurs, safely retry with the same `Idempotency-Key`.
+- Treat 200 + `Idempotent-Replay: true` as success (no duplicate debit).
 
 ## 6. Concurrency & Integrity
 | Concern | Approach |
@@ -257,17 +288,62 @@ DEMO_SEED=false DEMO_SEED_MAX=true php artisan db:seed --class=DatabaseSeeder
 ```
 
 ## 10. API Examples
-Create transfer:
+Create transfer (new):
 ```bash
 curl -X POST http://localhost:8000/api/transactions \
   -H 'Accept: application/json' \
   -H 'Authorization: Bearer <token>' \
-  -d 'receiver_id=2' -d 'amount=25.00' -d 'idempotency_key=6f8b1c0e-...'
+  -H 'Idempotency-Key: 1c1d7c3d-9b3c-4c2e-bf90-9a50b9a2c2dd' \
+  -d 'receiver_id=2' -d 'amount=25.00'
 ```
-List history:
-```bash
-curl -H 'Authorization: Bearer <token>' http://localhost:8000/api/transactions
+Response (first time):
+```json
+{
+  "data": {
+    "id": 42,
+    "uuid": "1c1d7c3d-9b3c-4c2e-bf90-9a50b9a2c2dd",
+    "sender_id": 1,
+    "receiver_id": 2,
+    "amount": "25.00",
+    "commission_fee": "0.38",
+    "status": "success",
+    "created_at": "2025-10-06T12:34:56.000000Z",
+    "idempotent_replay": false
+  }
+}
 ```
+Replay (identical request with same Idempotency-Key):
+```json
+{
+  "data": {
+    "id": 42,
+    "uuid": "1c1d7c3d-9b3c-4c2e-bf90-9a50b9a2c2dd",
+    "sender_id": 1,
+    "receiver_id": 2,
+    "amount": "25.00",
+    "commission_fee": "0.38",
+    "status": "success",
+    "created_at": "2025-10-06T12:34:56.000000Z",
+    "idempotent_replay": true
+  }
+}
+```
+Replay response headers (subset):
+```
+HTTP/1.1 200 OK
+Idempotent-Replay: true
+X-Request-ID: 5f1c9c1a-...
+```
+Conflict (different amount with same key):
+```json
+{
+  "error": "Idempotency key reused with different parameters.",
+  "type": "IdempotencyConflict",
+  "code": "wallet.idempotency_conflict",
+  "request_id": "c6d6c8e4-..."
+}
+```
+Status: 409 Conflict.
 
 ## 11. Frontend Dev Mode
 ```bash
@@ -291,10 +367,12 @@ Ensure Pusher keys in `.env` if you want live broadcasting.
 | Area | Enhancement |
 |------|-------------|
 | Pagination | Add cursor or since_id pagination for history |
-| Rate limiting | Throttle POST transfer (e.g., `throttle:60,1`) |
-| Idempotency race | Gracefully handle rare uuid unique constraint collision |
+| Rate limiting | Already applied (adjust as usage grows) |
+| Idempotency race | Already handled (unique constraint recovery) |
 | Commission sink | System account / ledger entries for commission accumulation |
 | History query | UNION optimization + covering indexes for huge tables |
+| Observability | Add structured logs & metrics (wallet.transfer.count, wallet.idempotency.replay) |
+| Validation | Enforce max amount & field length constraints |
 
 ## 15. Cleanup
 ```bash
