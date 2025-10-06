@@ -156,6 +156,7 @@ Validation errors (input field validation) still use Laravel's default shape:
 | ReceiverNotFound | 422 Unprocessable Entity | wallet.receiver_not_found | Referenced receiver_id not usable (treated as semantic failure, not URL resource) |
 | SenderNotFound | 422 Unprocessable Entity | wallet.sender_not_found | (Extremely rare) sender row missing mid-process |
 | IdempotencyConflict | 409 Conflict | wallet.idempotency_conflict | Same idempotency key reused with different parameters |
+| AmountTooLarge | 400 Bad Request | wallet.amount_too_large | User has sufficient balance but amount + commission exceeds internal integer cents range |
 | (Any future WalletException w/out override) | 422 Unprocessable Entity | wallet.<dynamic> | Default domain rule failure |
 
 Implementation details:
@@ -373,6 +374,7 @@ Ensure Pusher keys in `.env` if you want live broadcasting.
 | History query | UNION optimization + covering indexes for huge tables |
 | Observability | Add structured logs & metrics (wallet.transfer.count, wallet.idempotency.replay) |
 | Validation | Enforce max amount & field length constraints |
+| Amount limits | Consider migrating to big integer math (Brick\Math) to remove current representable upper bound (≈ 92,233,720,368,547,758.07 units) |
 
 ## 15. Cleanup
 ```bash
