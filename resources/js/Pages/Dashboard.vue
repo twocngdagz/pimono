@@ -4,7 +4,12 @@
     <div class="grid gap-6 md:grid-cols-3">
       <BalanceCard :balance="numericBalance" />
       <TransferForm @transfer-success="onTransferSuccess" @transfer-error="onTransferError" />
-      <TransactionsList :transactions="transactions" />
+      <TransactionsList
+        :transactions="transactions"
+        :has-more="hasMore"
+        :loading-more="loadingMore"
+        @load-more="loadMore"
+      />
     </div>
   </div>
 </template>
@@ -20,35 +25,64 @@ import { ensureAuthFetched, currentUser } from '../auth';
 const userId = ref(null);
 const balance = ref('0.00');
 const transactions = ref([]);
-let channel = null; // Echo channel reference
+let channel = null;
 const processedTxIds = new Set();
+
+const nextBeforeId = ref(null);
+const hasMore = ref(false);
+const loadingMore = ref(false);
+const pageLimit = 20;
 
 const numericBalance = computed(() => parseFloat(balance.value));
 
 async function fetchUser() {
   await ensureAuthFetched();
-  if (currentUser.value && currentUser.value.id) {
-    userId.value = currentUser.value.id;
-  }
+  if (currentUser.value?.id) userId.value = currentUser.value.id;
 }
 
-async function fetchTransactions() {
+async function fetchTransactions(options = { append: false, cursor: null }) {
+  const { append, cursor } = options;
+  const params = { limit: pageLimit };
+  if (cursor) params.before_id = cursor;
   try {
-    const res = await axios.get('/api/transactions');
+    const res = await axios.get('/api/transactions', { params });
     balance.value = res.data.data.balance;
-    transactions.value = res.data.data.transactions;
+    const list = res.data.data.transactions || [];
+    const meta = res.data.meta || {};
+    hasMore.value = !!meta.has_more;
+    nextBeforeId.value = meta.next_before_id || null;
+
+    if (append) {
+      const existingIds = new Set(transactions.value.map((t) => t.id));
+      for (const tx of list) {
+        if (!existingIds.has(tx.id)) {
+          transactions.value.push(tx);
+          processedTxIds.add(tx.id);
+        }
+      }
+    } else {
+      transactions.value = list;
+      processedTxIds.clear();
+      list.forEach((t) => processedTxIds.add(t.id));
+    }
   } catch (e) {
     console.warn('[Dashboard] Failed to fetch transactions', e?.response?.data || e.message);
   }
 }
 
-function handleEvent(e, source = 'primary') {
-  console.log(`[Dashboard] (${source}) TransferCompleted raw event`, e);
-  if (!e?.transaction) return;
-  if (processedTxIds.has(e.transaction.id)) {
-    console.log('[Dashboard] Duplicate transaction ignored', e.transaction.id);
-    return;
+async function loadMore() {
+  if (!hasMore.value || loadingMore.value || !nextBeforeId.value) return;
+  loadingMore.value = true;
+  try {
+    await fetchTransactions({ append: true, cursor: nextBeforeId.value });
+  } finally {
+    loadingMore.value = false;
   }
+}
+
+function handleEvent(e) {
+  if (!e?.transaction) return;
+  if (processedTxIds.has(e.transaction.id)) return;
   processedTxIds.add(e.transaction.id);
   const uid = Number(userId.value);
   if (e.sender_balance && uid === e.transaction.sender_id) {
@@ -56,33 +90,20 @@ function handleEvent(e, source = 'primary') {
   } else if (e.receiver_balance && uid === e.transaction.receiver_id) {
     balance.value = e.receiver_balance;
   }
-  const direction = Number(e.transaction.sender_id) === uid ? 'out' : 'in';
+  const direction = uid === Number(e.transaction.sender_id) ? 'out' : 'in';
   transactions.value.unshift({ ...e.transaction, direction });
+
+  if (transactions.value.length > pageLimit * 5) {
+    const removed = transactions.value.splice(pageLimit * 5);
+    removed.forEach((r) => processedTxIds.delete(r.id));
+  }
 }
 
 function subscribe() {
-  if (!window.Echo) {
-    return setTimeout(subscribe, 300);
-  }
-  if (!userId.value) {
-    return;
-  }
-  const privateName = `user.${userId.value}`;
+  if (!window.Echo) return setTimeout(subscribe, 300);
+  if (!userId.value) return;
   try {
-    channel = window.Echo.private(privateName).listen('.TransferCompleted', (e) =>
-      handleEvent(e, 'dot.name')
-    );
-
-    const bindInternal = (attempt = 0) => {
-      const internal = window.Echo.connector?.pusher?.channel(`private-${privateName}`);
-      if (!internal) {
-        if (attempt < 20) {
-          return setTimeout(() => bindInternal(attempt + 1), 150);
-        }
-        return;
-      }
-    };
-    bindInternal();
+    channel = window.Echo.private(`user.${userId.value}`).listen('.TransferCompleted', handleEvent);
   } catch (err) {
     console.error('[Dashboard] Error subscribing', err);
   }
@@ -97,18 +118,13 @@ async function bootstrap() {
 async function onTransferSuccess() {
   await fetchTransactions();
 }
-
 function onTransferError(msg) {
   console.warn('Transfer error', msg);
 }
 
-onMounted(() => {
-  bootstrap();
-});
+onMounted(bootstrap);
 
 onBeforeUnmount(() => {
-  if (channel) {
-    channel.stopListening('.TransferCompleted');
-  }
+  if (channel) channel.stopListening('.TransferCompleted');
 });
 </script>
