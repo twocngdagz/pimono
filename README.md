@@ -379,4 +379,99 @@ Ensure Pusher keys in `.env` if you want live broadcasting.
 docker compose down -v
 ```
 
----
+## Assignment Requirements Coverage
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| Users table with balance | Implemented | DECIMAL(20,2) balance updated atomically inside DB transaction |
+| Transactions table (sender, receiver, amount, commission, status, timestamps) | Implemented | Includes composite indexes for pagination |
+| POST /api/transactions (transfer) | Implemented | Idempotent (client key), commission applied, 201 vs 200 replay semantics |
+| GET /api/transactions (history + balance) | Implemented | Cursor pagination via `before_id`, merged directions with UNION |
+| Commission 1.5% debited from sender | Implemented | Integer cents, half‑up rounding |
+| Atomic money transfer | Implemented | Single DB transaction with row locks |
+| High concurrency safety | Implemented | Ordered locking (sorted IDs) + idempotency race recovery |
+| Real-time broadcast on success | Implemented | Pusher + ShouldBroadcastNow event `TransferCompleted` |
+| Real-time UI update (balances + history) | Implemented | Echo listener updates list & balance instantly |
+| Validation (amount, receiver exists, self-transfer, funds) | Implemented | FormRequest + domain exception mapping |
+| Data integrity (rollback on failure) | Implemented | Exceptions abort transaction; no partial state |
+| Performance strategy (scaled data set) | Implemented | Stored balance, composite indexes, UNION, minimal writes |
+| Optional/Extra: Notifications (DB store) | Omitted by design | Frontend shows real-time toast directly from event (no DB dependency) |
+
+## Real-Time Setup (Pusher)
+To enable real-time broadcasting locally or in deployment:
+1. Set / confirm in `.env`:
+```
+BROADCAST_CONNECTION=pusher
+PUSHER_APP_ID=your-app-id
+PUSHER_APP_KEY=your-app-key
+PUSHER_APP_SECRET=your-app-secret
+PUSHER_APP_CLUSTER=your-cluster
+```
+2. Expose the key to Vite (already wired in `.env.example`):
+```
+VITE_PUSHER_APP_KEY="${PUSHER_APP_KEY}"
+VITE_PUSHER_APP_CLUSTER="${PUSHER_APP_CLUSTER}"
+```
+3. Rebuild frontend (Vite) if it was already running.
+4. Open two browser sessions (different users); perform a transfer; the receiver’s dashboard updates instantly.
+5. For tests / offline dev without Pusher credentials set:
+```
+BROADCAST_CONNECTION=log
+```
+(phpunit.xml already forces `log` to avoid external calls during test runs.)
+
+### Environment Variable Quick Reference (Real-Time)
+| Variable | Required (Prod) | Purpose |
+|----------|-----------------|---------|
+| BROADCAST_CONNECTION | Yes | Must be `pusher` for live events (or `log` for local no-op) |
+| PUSHER_APP_ID | Yes | Pusher app identifier |
+| PUSHER_APP_KEY | Yes | Public key used by frontend |
+| PUSHER_APP_SECRET | Yes | Server-side auth for event broadcast |
+| PUSHER_APP_CLUSTER | Yes | Cluster region (e.g., `eu`) |
+
+## Pagination & Indexing Strategy
+`GET /api/transactions` merges outgoing and incoming transactions using two indexed scans:
+- Composite indexes: `(sender_id, id)` and `(receiver_id, id)` support efficient range scans.
+- Queries are UNION ALL’d, then ordered by `id DESC` and limited.
+- Cursor parameter: `before_id` (fetches older rows where `id < before_id`).
+- Limit parameter: `limit` (default 20 in UI, capped at 100 server-side).
+- Response meta:
+```
+"meta": {
+  "limit": 20,
+  "next_before_id": 9123,
+  "has_more": true
+}
+```
+This avoids large OR conditions and scales for millions of records by letting the database perform two narrow index traversals.
+
+## Performance & Architecture Summary
+| Concern | Approach |
+|---------|----------|
+| Balance reads | Stored `users.balance` (O(1)), updated atomically |
+| Double-spend / race | Row locking (`SELECT ... FOR UPDATE`) with deterministic ordering (sort user IDs) |
+| Idempotency retries | Client-generated key + lookup + replay or 409 conflict |
+| Race on create (duplicate key) | Unique constraint caught → re-query existing transaction (replay) |
+| Commission precision | Integer cent math + half-up rounding (15/1000) |
+| Query load (history) | UNION of two indexed scans + cursor pagination |
+| Write path | Two user updates + one insert = minimal IO |
+| Large amounts | 20,2 DECIMAL + integer intermediary prevents float drift |
+| Real-time latency | `ShouldBroadcastNow` (synchronous) for immediate UI response |
+| Error consistency | Central WalletException mapping -> JSON (code + request_id) |
+| Observability | `X-Request-ID` correlation + idempotent replay headers |
+
+## Testing Summary
+| Area | Examples |
+|------|----------|
+| Service logic | Commission rounding (0.01, 0.67, large values), idempotency, exceptions |
+| API | Validation errors, insufficient funds, idempotency conflict & replay (201 vs 200) |
+| Exception mapping | Status codes & JSON structure (400 / 422 / 409) |
+| Concurrency | Alternating stress test (ensures no deadlocks + sum checks) |
+| Pagination (manual) | Cursor logic exercised via UI (optional to extend with feature tests) |
+| Balance integrity | Assertions after each transfer path |
+
+## Additional Notes (Operational)
+- **Replay semantics:** first success = 201 Created; identical replay = 200 OK + `Idempotent-Replay: true` header and `idempotent_replay: true` body flag.
+- **Commission example:** 1.00 → commission 0.02 (1.5% of 1.00 = 0.015 half-up => 0.02).
+- **Cursor pagination:** stable because IDs are monotonic increasing primary keys.
+- **Scaling path:** Introduce ledger entries (double-entry) if full audit reconstruction or multi-currency is added later.
+- **Optional improvements (future):** Add metrics (transfer count, replay count), server-side cached unread notifications (if DB notification layer desired later), direction filters (`?direction=in`).
