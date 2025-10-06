@@ -146,3 +146,57 @@ it('validates negative amount as invalid format', function () {
     $response->assertStatus(422)
         ->assertJsonValidationErrors(['amount']);
 });
+
+it('replays same idempotency key returning same transaction and sets idempotent_replay on second response', function () {
+    $sender = User::factory()->create(['balance' => '100.00']);
+    $receiver = User::factory()->create(['balance' => '0.00']);
+    actingAs($sender, 'sanctum');
+
+    $key = (string) Str::uuid();
+
+    $first = postJson('/api/transactions', [
+        'receiver_id' => $receiver->id,
+        'amount' => '10.00',
+        'idempotency_key' => $key,
+    ], ['Idempotency-Key' => $key])->assertCreated();
+
+    $firstUuid = $first->json('data.uuid');
+
+    $second = postJson('/api/transactions', [
+        'receiver_id' => $receiver->id,
+        'amount' => '10.00',
+        'idempotency_key' => $key,
+    ], ['Idempotency-Key' => $key])->assertStatus(200);
+
+    expect($second->json('data.uuid'))->toBe($firstUuid)
+        ->and($second->json('data.idempotent_replay'))->toBeTrue();
+    expect($second->headers->get('Idempotent-Replay'))->toBe('true');
+});
+
+it('prefers Idempotency-Key header over body key', function () {
+    $sender = User::factory()->create(['balance' => '50.00']);
+    $receiver = User::factory()->create(['balance' => '0.00']);
+    actingAs($sender, 'sanctum');
+
+    $headerKey = (string) Str::uuid();
+    $bodyKey = (string) Str::uuid();
+
+    // First call establishes transaction with headerKey
+    postJson('/api/transactions', [
+        'receiver_id' => $receiver->id,
+        'amount' => '5.00',
+        'idempotency_key' => $bodyKey, // should be ignored
+    ], ['Idempotency-Key' => $headerKey])->assertCreated();
+
+    // Second call with same header key but different amount should conflict, regardless of body key difference
+    $response = postJson('/api/transactions', [
+        'receiver_id' => $receiver->id,
+        'amount' => '6.00',
+        'idempotency_key' => $bodyKey, // still ignored
+    ], ['Idempotency-Key' => $headerKey]);
+
+    $response->assertStatus(409)
+        ->assertJson([
+            'type' => 'IdempotencyConflict',
+        ]);
+});

@@ -11,5 +11,5 @@ Route::get('/user', function (Request $request) {
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/transactions', [TransactionController::class, 'index']);
-    Route::post('/transactions', [TransferController::class, 'store']);
+    Route::post('/transactions', [TransferController::class, 'store'])->middleware('throttle:60,1');
 });

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\RequestIdMiddleware;
 use App\Services\Wallet\Exceptions\WalletException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -15,16 +16,19 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->statefulApi();
+        $middleware->append(RequestIdMiddleware::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (WalletException $e, $request) {
             $status = $e->httpStatus();
+            $requestId = $request->attributes->get('request_id');
 
             return response()->json([
                 'error' => $e->getMessage(),
                 'type' => class_basename($e),
                 'code' => $e->errorCode(),
-            ], $status);
+                'request_id' => $requestId,
+            ], $status)->header('X-Request-ID', $requestId);
         });
     })
     ->create();

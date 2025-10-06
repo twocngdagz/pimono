@@ -11,6 +11,7 @@ use App\Services\Wallet\Exceptions\InsufficientFunds;
 use App\Services\Wallet\Exceptions\InvalidAmountFormat;
 use App\Services\Wallet\Exceptions\ReceiverNotFound;
 use App\Services\Wallet\Exceptions\SenderNotFound;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -59,19 +60,14 @@ class TransferService
             $orderedIds = [$sender->id, $receiverId];
             sort($orderedIds, SORT_NUMERIC);
 
-            /** @var array<int, User> $locked */
             $locked = User::whereIn('id', $orderedIds)->lockForUpdate()->get()->keyBy('id')->all();
-
             if (! isset($locked[$sender->id])) {
                 throw new SenderNotFound('Sender not found.');
             }
             if (! isset($locked[$receiverId])) {
                 throw new ReceiverNotFound('Receiver not found.');
             }
-
-            /** @var User $lockedSender */
             $lockedSender = $locked[$sender->id];
-            /** @var User $lockedReceiver */
             $lockedReceiver = $locked[$receiverId];
 
             $amountCents = $this->toCents($amount);
@@ -80,33 +76,46 @@ class TransferService
 
             $commissionCents = $this->calculateCommissionCents($amountCents);
             $commission = $this->centsToString($commissionCents);
-
             $totalDebitCents = $amountCents + $commissionCents;
-
             if ($senderBalanceCents < $totalDebitCents) {
                 throw new InsufficientFunds('Insufficient balance to perform transfer.');
             }
 
             $senderBalanceCents -= $totalDebitCents;
             $receiverBalanceCents += $amountCents;
-
             $lockedSender->balance = $this->centsToString($senderBalanceCents);
             $lockedReceiver->balance = $this->centsToString($receiverBalanceCents);
-
             $lockedSender->save();
             $lockedReceiver->save();
 
             $uuid = $idempotencyKey ?: (string) Str::uuid();
 
-            /** @var Transaction $transaction */
-            $transaction = $this->transactionModel->newQuery()->create([
-                'uuid' => $uuid,
-                'sender_id' => $lockedSender->id,
-                'receiver_id' => $lockedReceiver->id,
-                'amount' => $amount,
-                'commission_fee' => $commission,
-                'status' => 'success',
-            ]);
+            try {
+                $transaction = $this->transactionModel->newQuery()->create([
+                    'uuid' => $uuid,
+                    'sender_id' => $lockedSender->id,
+                    'receiver_id' => $lockedReceiver->id,
+                    'amount' => $amount,
+                    'commission_fee' => $commission,
+                    'status' => 'success',
+                ]);
+            } catch (QueryException $qe) {
+                // Recover from potential race on unique uuid (idempotency) creation
+                if ($idempotencyKey) {
+                    $existing = $this->transactionModel->newQuery()->where('uuid', $idempotencyKey)->first();
+                    if ($existing) {
+                        $existingAmountNormalized = $this->normalizeAmount((string) $existing->amount);
+                        $same = ($existing->sender_id === $lockedSender->id)
+                            && ($existing->receiver_id === $lockedReceiver->id)
+                            && ($existingAmountNormalized === $amount);
+                        if ($same) {
+                            return $existing;
+                        }
+                        throw new IdempotencyConflict('Idempotency key reused with different parameters.');
+                    }
+                }
+                throw $qe;
+            }
 
             return $transaction;
         });

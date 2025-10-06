@@ -16,14 +16,17 @@ class TransferController extends Controller
         $sender = $request->user();
         $receiverId = (int) $request->input('receiver_id');
         $amount = (string) $request->input('amount');
-        $idempotencyKey = $request->input('idempotency_key');
+
+        $idempotencyKey = $request->header('Idempotency-Key') ?? $request->input('idempotency_key');
 
         $tx = $service->transfer($sender, $receiverId, $amount, $idempotencyKey);
 
-        // Broadcast to sender & receiver private channels (excluding origin socket)
+        $replayed = $idempotencyKey && $tx->uuid === $idempotencyKey && $tx->wasRecentlyCreated === false;
+
         broadcast(new TransferCompleted($tx))->toOthers();
 
-        return response()->json([
+        $status = $replayed ? 200 : 201;
+        $response = response()->json([
             'data' => [
                 'id' => $tx->id,
                 'uuid' => $tx->uuid,
@@ -33,7 +36,14 @@ class TransferController extends Controller
                 'commission_fee' => $tx->commission_fee,
                 'status' => $tx->status,
                 'created_at' => $tx->created_at?->toJSON(),
+                'idempotent_replay' => $replayed,
             ],
-        ], 201);
+        ], $status);
+
+        if ($replayed) {
+            $response->headers->set('Idempotent-Replay', 'true');
+        }
+
+        return $response;
     }
 }
