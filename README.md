@@ -495,7 +495,7 @@ SANCTUM_STATEFUL_DOMAINS=example.com or pimono.test
 - Composite indexes: `(sender_id, id)` and `(receiver_id, id)` support efficient range scans.
 - Queries are UNION ALL’d, then ordered by `id DESC` and limited.
 - Cursor parameter: `before_id` (fetches older rows where `id < before_id`).
-- Limit parameter: `limit` (default 20 in UI, capped at 100 server-side).
+- Limit parameter: `limit` (default 20 in UI, capped at 50 server-side).
 - Response meta:
 ```
 "meta": {
