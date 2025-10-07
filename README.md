@@ -1,7 +1,7 @@
 # Mini Wallet (High-Concurrency Demo)
 
 A simplified digital wallet API + SPA (Laravel 12 + Vue 3) focused on MySQL for high‑concurrency balance updates, idempotent transfers, and real‑time broadcasting.
-
+For convenience a site has been deployed at: https://pimono-pmggx7hz.on-forge.com/
 ## 1. Features
 - POST `/api/transactions` – create transfer (idempotent with automatic client key)
 - GET `/api/transactions` – recent history (incoming + outgoing) + current balance
