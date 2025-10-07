@@ -34,8 +34,21 @@
         <span v-else>Signing In...</span>
       </button>
     </form>
-    <p class="text-xs text-gray-500 mt-4">
-      Use seeded demo accounts (e.g. alice@example.com / password1)
+    <p class="text-xs text-gray-500 mt-4 space-y-1">
+      <span class="block font-semibold text-gray-600">Sample Accounts (seeded)</span>
+      <span class="block">1 · Alice &mdash; alice@example.com / <code>password1</code></span>
+      <span class="block">2 · Bob &mdash; bob@example.com / <code>password2</code></span>
+      <span class="block">3 · Charlie &mdash; charlie@example.com / <code>password3</code></span>
+      <span class="block">4 · Whale &mdash; whale@example.com / <code>password</code></span>
+      <span class="block">5 · Demo User 1 &mdash; demo1@example.com / <code>password</code></span>
+      <span class="block"
+        >6&ndash;25 · Demo User N &mdash; demoN@example.com / <code>password</code></span
+      >
+      <span class="block">26 · Load User 1 &mdash; load1@example.com / <code>password</code></span>
+      <span class="block"
+        >27&ndash;275 · Load User N &mdash; loadN@example.com / <code>password</code></span
+      >
+      <span class="block italic">IDs assume a fresh seed without prior data.</span>
     </p>
   </div>
 </template>
