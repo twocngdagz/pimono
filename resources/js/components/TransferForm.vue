@@ -70,14 +70,35 @@ const error = ref('');
 const info = ref('');
 const preview = ref(null);
 
+// Option C: Simple maximum major amount (whole-number part) threshold.
+// If user enters a value with whole part greater than this 16-digit number, we block it.
+// NOTE: This threshold itself (9,999,999,999,999,999) exceeds JS Number safe integer precision,
+// so calculations beyond ~9,007,199,254,740,991 may display rounding. We accept this per requirement.
+const MAX_MAJOR_AMOUNT_STR = '9999999999999999';
+
 const emit = defineEmits(['transfer-success', 'transfer-error']);
+
+function exceedsMaxMajor(wholeStr) {
+  const trimmed = (wholeStr || '').replace(/^0+/, '') || '0';
+  if (trimmed.length < MAX_MAJOR_AMOUNT_STR.length) return false;
+  if (trimmed.length > MAX_MAJOR_AMOUNT_STR.length) return true;
+  return trimmed > MAX_MAJOR_AMOUNT_STR; // lexicographic works because equal length digits only
+}
 
 function parseToCents(val) {
   const s = String(val).trim();
-  if (!/^\d+(?:\.\d{1,2})?$/.test(s)) return null;
+  if (!/^[0-9]+(?:\.[0-9]{1,2})?$/.test(s)) return null;
   const [i, f = ''] = s.split('.');
+  if (exceedsMaxMajor(i)) return null; // treat as invalid for parse (will trigger error in computePreview)
   const frac = (f + '00').slice(0, 2);
+  // Warning: may be imprecise for very large i but acceptable per chosen Option C.
   return parseInt(i, 10) * 100 + parseInt(frac, 10);
+}
+function centsToDecimalString(cents) {
+  const abs = Math.abs(cents);
+  const whole = Math.trunc(abs / 100);
+  const frac = String(abs % 100).padStart(2, '0');
+  return (cents < 0 ? '-' : '') + whole + '.' + frac;
 }
 function formatMoney(cents) {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(
@@ -86,13 +107,19 @@ function formatMoney(cents) {
 }
 
 function computePreview() {
-  const cents = parseToCents(amount.value);
-  if (cents === null || cents === 0) {
+  error.value = '';
+  const raw = String(amount.value).trim();
+  if (raw === '') { preview.value = null; return; }
+  if (!/^[0-9]+(?:\.[0-9]{1,2})?$/.test(raw)) { preview.value = null; return; }
+  const [whole] = raw.split('.');
+  if (exceedsMaxMajor(whole)) {
     preview.value = null;
+    error.value = 'Amount too large to represent safely.';
     return;
   }
-  // commission cents = (cents * 15 + 500) / 1000 (integer division) half-up
-  const commission = Math.floor((cents * 15 + 500) / 1000);
+  const cents = parseToCents(raw);
+  if (cents === null || cents === 0) { preview.value = null; return; }
+  const commission = Math.floor((cents * 15 + 500) / 1000); // 1.5% half-up
   const totalDebit = cents + commission;
   preview.value = { amount: cents, commission, totalDebit };
 }
@@ -105,7 +132,12 @@ const insufficient = computed(() => {
   return preview.value.totalDebit > Math.round(props.currentBalance * 100);
 });
 
-const canSubmit = computed(() => receiverId.value && parseFloat(amount.value) > 0);
+const canSubmit = computed(() => {
+  if (!receiverId.value) return false;
+  if (error.value) return false;
+  const cents = parseToCents(amount.value);
+  return cents !== null && cents > 0;
+});
 
 function newIdempotencyKey() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
@@ -123,11 +155,17 @@ async function submit() {
   submitting.value = true;
   const key = newIdempotencyKey();
   try {
+    const cents = parseToCents(amount.value);
+    if (cents === null) {
+      error.value = 'Invalid amount.';
+      submitting.value = false;
+      return;
+    }
     const res = await axios.post(
       '/api/transactions',
       {
         receiver_id: receiverId.value,
-        amount: Number(amount.value).toFixed(2),
+        amount: centsToDecimalString(cents),
         idempotency_key: key,
       },
       { headers: { 'Idempotency-Key': key } }
