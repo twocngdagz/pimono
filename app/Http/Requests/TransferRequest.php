@@ -10,7 +10,7 @@ class TransferRequest extends FormRequest
     {
         return auth()->check();
     }
-    
+
     protected function prepareForValidation(): void
     {
         if ($this->has('amount')) {

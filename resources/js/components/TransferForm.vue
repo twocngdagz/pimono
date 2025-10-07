@@ -109,8 +109,14 @@ function formatMoney(cents) {
 function computePreview() {
   error.value = '';
   const raw = String(amount.value).trim();
-  if (raw === '') { preview.value = null; return; }
-  if (!/^[0-9]+(?:\.[0-9]{1,2})?$/.test(raw)) { preview.value = null; return; }
+  if (raw === '') {
+    preview.value = null;
+    return;
+  }
+  if (!/^[0-9]+(?:\.[0-9]{1,2})?$/.test(raw)) {
+    preview.value = null;
+    return;
+  }
   const [whole] = raw.split('.');
   if (exceedsMaxMajor(whole)) {
     preview.value = null;
@@ -118,7 +124,10 @@ function computePreview() {
     return;
   }
   const cents = parseToCents(raw);
-  if (cents === null || cents === 0) { preview.value = null; return; }
+  if (cents === null || cents === 0) {
+    preview.value = null;
+    return;
+  }
   const commission = Math.floor((cents * 15 + 500) / 1000); // 1.5% half-up
   const totalDebit = cents + commission;
   preview.value = { amount: cents, commission, totalDebit };
