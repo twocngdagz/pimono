@@ -336,9 +336,88 @@ Number of users created depends on `DEMO_USERS` (for Demo Users) and `DEMO_USERS
 
 Security note: These credentials are intentionally weak and MUST NOT be used in any production or publicly exposed environment.
 
-...existing code...
-
 ## 10. API Examples
+
+### 10.1 Authentication (Two Supported Flows)
+You can authenticate either with a browser **session (Sanctum SPA flow)** or with a **personal access token (Bearer)**.
+
+#### A) Session / Cookie (SPA) Flow (used by the Vue frontend)
+1. Get CSRF cookie (establishes XSRF-TOKEN + session cookie):
+```bash
+curl -i -c cookies.txt -b cookies.txt \
+  -H 'Accept: application/json' \
+  http://localhost:8000/sanctum/csrf-cookie
+```
+2. Login with credentials:
+```bash
+curl -i -c cookies.txt -b cookies.txt \
+  -H 'Accept: application/json' \
+  -H 'X-XSRF-TOKEN: $(grep XSRF-TOKEN cookies.txt | tail -n1 | awk '{print $7}' | perl -MURI::Escape -ne 'print uri_unescape($_)')' \
+  -X POST http://localhost:8000/login \
+  -d 'email=alice@example.com' -d 'password=password1'
+```
+3. Call protected API (cookies carry auth automatically):
+```bash
+curl -s -c cookies.txt -b cookies.txt -H 'Accept: application/json' \
+  http://localhost:8000/api/transactions | jq
+```
+4. Logout (destroys session):
+```bash
+curl -X POST -c cookies.txt -b cookies.txt -H 'X-XSRF-TOKEN: $(grep XSRF-TOKEN cookies.txt | tail -n1 | awk '{print $7}' | perl -MURI::Escape -ne 'print uri_unescape($_)')' \
+  http://localhost:8000/logout -i
+```
+
+Pros: Automatic rotation / revocation with session invalidation; mitigates token leakage risk (httpOnly cookie).  
+Cons: More steps in raw curl (CSRF handling).
+
+#### B) Personal Access Token (Bearer) Flow
+1. Request a token using email/password:
+```bash
+curl -s -X POST http://localhost:8000/api/token \
+  -H 'Accept: application/json' \
+  -d 'email=alice@example.com' -d 'password=password1' -d 'device_name=cli' | jq
+```
+Response:
+```json
+{
+  "token_type": "Bearer",
+  "token": "1|2v3...<redacted>...pQ",
+  "user": { "id": 1, "email": "alice@example.com", "name": "Alice Example", "balance": "1000.00" }
+}
+```
+2. Use the token:
+```bash
+TOKEN="<paste-token-here>"
+curl -s http://localhost:8000/api/transactions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Accept: application/json' | jq
+```
+3. Create a transfer with token & idempotency key:
+```bash
+IDEMP=$(uuidgen || echo 00000000-0000-4000-8000-000000000000)
+curl -s -X POST http://localhost:8000/api/transactions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: $IDEMP" \
+  -H 'Accept: application/json' \
+  -d 'receiver_id=2' -d 'amount=25.00' | jq
+```
+4. Replay (same key) returns HTTP 200 with `idempotent_replay=true`:
+```bash
+curl -s -X POST http://localhost:8000/api/transactions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: $IDEMP" \
+  -H 'Accept: application/json' \
+  -d 'receiver_id=2' -d 'amount=25.00' | jq
+```
+
+Revocation: Delete/unset the token (no endpoint provided for per-token revocation here, but Sanctum supports deleting tokens server-side if needed). For this demo you can just discard it or rotate by requesting a new one.
+
+Security Notes:
+- Treat personal access tokens like passwords (store securely, prefer ephemeral lifetimes in production).
+- Use HTTPS in any non-local environment.
+- Do NOT check real tokens into version control or logs.
+
+### 10.2 Transfer Endpoint Examples
 Create transfer (new):
 ```bash
 curl -X POST http://localhost:8000/api/transactions \
