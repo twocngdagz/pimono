@@ -471,6 +471,16 @@ BROADCAST_CONNECTION=log
 ```
 (phpunit.xml already forces `log` to avoid external calls during test runs.)
 
+6. When deploying to forge or production server, ensure the environment variable is set.
+```
+SESSION_DOMAIN=example.com or null for local development
+```
+
+7. If you have different url for local like ".test" for herd or other than localhost, you need to set it in .env. You also need to set this on your production server.
+```aiignore
+SANCTUM_STATEFUL_DOMAINS=example.com or pimono.test
+```
+
 ### Environment Variable Quick Reference (Real-Time)
 | Variable | Required (Prod) | Purpose |
 |----------|-----------------|---------|
