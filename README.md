@@ -279,14 +279,64 @@ DEMO_USERS_MAX=300
 DEMO_TRANSFERS_MAX=10000
 ```
 
-### Reset & Reseed
-```bash
-php artisan migrate:fresh --seed
+### 9.2 Demo Accounts & Credentials
+When you seed (`php artisan db:seed --class=DatabaseSeeder`) the following baseline users are ALWAYS created (independent of DEMO_SEED flags):
+
+| Role / Purpose | Name | Email | Password | Starting Balance |
+|----------------|------|-------|----------|------------------|
+| Primary demo user | Alice Example | alice@example.com | password1 | 1000.00 |
+| Secondary demo user | Bob Example | bob@example.com | password2 | 500.00 |
+| Low-balance demo user | Charlie Example | charlie@example.com | password3 | 50.00 |
+
+Additional users created ONLY when `DEMO_SEED=true` (default in non‑production):
+
+| Role | Name | Email | Password | Balance |
+|------|------|-------|----------|---------|
+| High-balance source for large transfers | Whale User | whale@example.com | password | 1,000,000.00 |
+| Random demo users (count = DEMO_USERS, default 20) | Demo User N | demoN@example.com | password | Random 10.00 – 25,000.00 |
+
+If `DEMO_SEED_MAX=true` (large dataset seeder) runs, extra high‑volume accounts are added:
+
+| Role | Name | Email | Password | Balance |
+|------|------|-------|----------|---------|
+| Very high-balance source for very large transfers | Mega Whale | mega.whale@example.com | password | 5,000,000.00 |
+| Load testing users (count = DEMO_USERS_MAX, default 250) | Load User N | loadN@example.com | password | Random 5.00 – 75,000.00 |
+
+Notes:
+- Random users (`Demo User N`, `Load User N`) all share the simple password `password` for convenience.
+- Passwords are intentionally weak—DO NOT deploy with these defaults.
+- Whale / Mega Whale users enable generation of very large successful transfers used in example history & performance tests.
+- Failed transactions inserted by seeders use random sender/receiver pairs and do not modify balances.
+
+Quick Login Reference (after default seed):
+```text
+Alice (sender)   alice@example.com   password1
+Bob (receiver)   bob@example.com     password2
+Charlie (low)    charlie@example.com password3
+Whale (if DEMO_SEED=true)        whale@example.com       password
+Mega Whale (if DEMO_SEED_MAX=true) mega.whale@example.com password
 ```
-Override on-the-fly (one-off):
-```bash
-DEMO_SEED=false DEMO_SEED_MAX=true php artisan db:seed --class=DatabaseSeeder
+
+### 9.3 Demo & Load User Credential Patterns (Explicit)
+In addition to the named baseline accounts above, seeders generate indexed demo and load testing users that all share the same simple password for convenience in local development.
+
+| User Type | Email Pattern | Password | Example First Two |
+|-----------|---------------|----------|-------------------|
+| Demo User (when `DEMO_SEED=true`) | `demoN@example.com` where N starts at 1 | `password` | `demo1@example.com`, `demo2@example.com` |
+| Load User (when `DEMO_SEED_MAX=true`) | `loadN@example.com` where N starts at 1 | `password` | `load1@example.com`, `load2@example.com` |
+
+Quick examples:
+```text
+demo1@example.com / password
+demo7@example.com / password
+load1@example.com / password
+load125@example.com / password
 ```
+Number of users created depends on `DEMO_USERS` (for Demo Users) and `DEMO_USERS_MAX` (for Load Users). If you change those environment variables the highest N will adjust accordingly.
+
+Security note: These credentials are intentionally weak and MUST NOT be used in any production or publicly exposed environment.
+
+...existing code...
 
 ## 10. API Examples
 Create transfer (new):
