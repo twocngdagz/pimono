@@ -15,7 +15,7 @@ For convenience a site has been deployed at: https://pimono-pmggx7hz.on-forge.co
 
 ## 2. Tech Stack
 - Backend: Laravel 12 (PHP 8.3)
-- Frontend: Vue 3 (Composition API) + Vite
+- Frontend: Node v20 and Vue 3 (Composition API) + Vite
 - Database: MySQL 8.x (SQLite used only internally for automated tests)
 - Auth: Laravel Sanctum
 - Real-time: Pusher Channels
